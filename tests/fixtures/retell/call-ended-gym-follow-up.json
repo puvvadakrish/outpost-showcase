@@ -1,0 +1,17 @@
+{
+  "event": "call_ended",
+  "agent_id": "agent_acme_fitness_preview",
+  "call_id": "retell_call_preview_001",
+  "start_timestamp": 1783274400000,
+  "end_timestamp": 1783274640000,
+  "duration_ms": 240000,
+  "inbound_minutes": 4,
+  "outbound_transfer_minutes": 0,
+  "transcript": "Caller: I want to understand membership options. Agent: I can help collect that for staff follow-up.",
+  "caller_name": "Prospective member",
+  "caller_phone": "+15550101010",
+  "call_summary": "Prospective member asked for membership options and needs staff follow-up.",
+  "intent": "membership_options",
+  "recommended_next_step": "Call the prospective member back with approved membership details.",
+  "confidence": 0.82
+}

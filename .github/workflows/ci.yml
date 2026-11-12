@@ -1,0 +1,150 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
+
+  database-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: outpost_test
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d outpost_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: outpost_test
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ariga/setup-atlas@d1698c9cc991e6d65a02ce8bb9cd69fba6223cff
+        with:
+          version: v1.2.0
+      - name: Validate migration directory integrity
+        run: atlas migrate validate --dir file://neon/migrations
+      - name: Prepare Neon-owned database prerequisites
+        run: |
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+          create role anonymous;
+          create role authenticated;
+          create schema auth;
+          create function auth.uid() returns uuid language sql stable as 'select null::uuid';
+          create function auth.jwt() returns jsonb language sql stable as 'select ''{}''::jsonb';
+          create schema neon_auth;
+          create table neon_auth."user" (id uuid primary key);
+          SQL
+      - name: Refuse ledger-less established database without a verified baseline
+        run: >-
+          node --input-type=module -e '
+          import { assertMigrationTargetReady } from "./scripts/apply-neon-migrations.mjs";
+          try {
+            assertMigrationTargetReady({ databaseUrl: process.env.OUTPOST_DATABASE_URL });
+            process.exit(1);
+          } catch (error) {
+            if (!String(error.message).includes("OUTPOST_NEON_BASELINE_VERSION")) throw error;
+          }'
+        env:
+          OUTPOST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/outpost_test?sslmode=disable
+      - name: Apply complete checksummed migration history
+        run: npm run db:migrations:apply
+        env:
+          OUTPOST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/outpost_test?sslmode=disable
+          OUTPOST_NEON_GREENFIELD_CONFIRMATION: neon-auth-only-public-empty
+      - name: Verify the applied revision ledger
+        run: >-
+          node --input-type=module -e '
+          import { assertMigrationTargetReady } from "./scripts/apply-neon-migrations.mjs";
+          const state = assertMigrationTargetReady({ databaseUrl: process.env.OUTPOST_DATABASE_URL });
+          if (state !== "ledger") throw new Error(`Unexpected migration state: ${state}`);'
+        env:
+          OUTPOST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/outpost_test?sslmode=disable
+      - name: Verify beta-request cooldown and immutable details
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/owner-beta-access-request-hardening.sql
+      - name: Verify owner setup creation contracts
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/owner-setup-expansion.sql
+      - name: Verify founder-admin beta proof summary authority
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/founder-admin-beta-proof-summary-authority.sql
+      - name: Verify provider secret boundary contracts
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/provider-secret-boundary.sql
+      - name: Verify provider ingress authority contracts
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/provider-ingress-authority.sql
+      - name: Verify provider ingress stop concurrency contracts
+        run: sh tests/sql/provider-ingress-authority-concurrency.sh
+        env:
+          OUTPOST_DISPOSABLE_DATABASE_CONFIRMATION: provider-ingress-authority-concurrency
+      - name: Verify runtime authority and tenant processing contracts
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/runtime-authority-tenant-processing.sql
+      - name: Verify runtime policy candidate authority contracts
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/runtime-policy-candidate-authority.sql
+      - name: Verify runtime policy review decision authority contracts
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/runtime-policy-review-decision-authority.sql
+      - name: Verify runtime policy review decision concurrency contracts
+        run: sh tests/sql/runtime-policy-review-decision-concurrency.sh
+        env:
+          OUTPOST_DISPOSABLE_DATABASE_CONFIRMATION: runtime-policy-review-decision-concurrency
+      - name: Verify runtime policy review currentness authority contracts
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/runtime-policy-review-currentness-authority.sql
+      - name: Verify runtime policy review currentness concurrency contracts
+        run: sh tests/sql/runtime-policy-review-currentness-concurrency.sh
+        env:
+          OUTPOST_DISPOSABLE_DATABASE_CONFIRMATION: runtime-policy-review-currentness-concurrency
+      - name: Verify runtime policy review history authority contracts
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/runtime-policy-review-history-authority.sql
+      - name: Verify runtime policy review history concurrency contracts
+        run: sh tests/sql/runtime-policy-review-history-concurrency.sh
+        env:
+          OUTPOST_DISPOSABLE_DATABASE_CONFIRMATION: runtime-policy-review-history-concurrency
+      - name: Verify runtime policy candidate lineage authority contracts
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/runtime-policy-candidate-lineage-authority.sql
+      - name: Verify runtime policy candidate lineage concurrency contracts
+        run: sh tests/sql/runtime-policy-candidate-lineage-concurrency.sh
+        env:
+          OUTPOST_DISPOSABLE_DATABASE_CONFIRMATION: runtime-policy-candidate-lineage-concurrency
+      - name: Verify runtime policy candidate review manifest authority contracts
+        run: psql -v ON_ERROR_STOP=1 -f tests/sql/runtime-policy-candidate-review-manifest-authority.sql
+      - name: Verify runtime policy candidate review manifest concurrency contracts
+        run: sh tests/sql/runtime-policy-candidate-review-manifest-concurrency.sh
+        env:
+          OUTPOST_DISPOSABLE_DATABASE_CONFIRMATION: runtime-policy-candidate-review-manifest-concurrency
+      - name: Verify capability relation-grant rejection
+        run: node tests/postgres/capability-relation-authority.mjs
+        env:
+          OUTPOST_DISPOSABLE_DATABASE_CONFIRMATION: capability-relation-authority
+      - name: Verify runtime stop concurrency contracts
+        run: sh tests/sql/runtime-authority-concurrency.sh
+        env:
+          OUTPOST_DISPOSABLE_DATABASE_CONFIRMATION: runtime-authority-concurrency

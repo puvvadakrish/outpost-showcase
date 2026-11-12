@@ -1,0 +1,13 @@
+{
+  "event": "email.received",
+  "message_id": "email_preview_001",
+  "received_at": "2026-07-07T15:25:00.000Z",
+  "from_label": "Gym member",
+  "from_email": "member@example.com",
+  "subject": "Question about freezing my membership",
+  "text_body": "Hi, can someone tell me what I need to do to freeze my membership next month?",
+  "mailbox_label": "frontdesk@example.com",
+  "suggested_intent": "membership_freeze_question",
+  "suggested_next_step": "Review freeze policy and follow up with the member from the approved answer bank.",
+  "confidence": 0.78
+}

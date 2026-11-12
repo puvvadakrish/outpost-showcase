@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+dist/
+coverage/
+test-results/
+artifacts/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store
+excalidraw.log
+supabase/.branches/
+supabase/.temp/
+.vercel
+.compound-engineering/*.local.yaml
